@@ -12,9 +12,9 @@ import {
   type IChartApi,
   type UTCTimestamp,
 } from "lightweight-charts";
-import { apiGet, fmt, fmtBig, type Candle } from "../../lib/api";
+import { apiGet, fmt, fmtBig, getCurrencySymbol, type Candle } from "../../lib/api";
 import { sma, ema, vwap, rsi, macd, bollinger, type Point } from "../../lib/indicators";
-import { useWidgetSymbol, type WidgetInstance } from "../../store/terminal";
+import { useTerminal, useWidgetSymbol, type WidgetInstance } from "../../store/terminal";
 
 const RANGES = ["1D", "5D", "1M", "6M", "YTD", "1Y", "5Y", "MAX"] as const;
 const CHART_TYPES = ["candles", "bars", "line", "area"] as const;
@@ -34,6 +34,8 @@ const INDICATOR_COLOR: Record<string, string> = {
 
 export default function ChartWidget({ widget }: { widget: WidgetInstance }) {
   const symbol = useWidgetSymbol(widget);
+  const theme = useTerminal((s) => s.theme);
+  const curSym = getCurrencySymbol(undefined, symbol);
   const [range, setRange] = useState<Range>("6M");
   const [chartType, setChartType] = useState<ChartType>("candles");
   const [active, setActive] = useState<Set<Indicator>>(new Set(["SMA20"]));
@@ -122,6 +124,36 @@ export default function ChartWidget({ widget }: { widget: WidgetInstance }) {
     return rows;
   }, [legend, indicatorMaps]);
 
+  // Timeframe return and range statistics (calculates % return, dollar change, range high/low)
+  const timeframeStats = useMemo(() => {
+    if (!candles || candles.length === 0) return null;
+    const first = candles[0];
+    const last = candles[candles.length - 1];
+    const startPrice = first.open ?? first.close;
+    const endPrice = last.close;
+    const change = endPrice - startPrice;
+    const changePercent = startPrice > 0 ? (change / startPrice) * 100 : 0;
+
+    let high = -Infinity;
+    let low = Infinity;
+    let totalVol = 0;
+    for (const c of candles) {
+      if (c.high > high) high = c.high;
+      if (c.low < low) low = c.low;
+      totalVol += c.volume ?? 0;
+    }
+
+    return {
+      startPrice,
+      endPrice,
+      change,
+      changePercent,
+      high: high !== -Infinity ? high : null,
+      low: low !== Infinity ? low : null,
+      totalVol,
+    };
+  }, [candles]);
+
   useEffect(() => {
     setLegend(candles && candles.length > 0 ? candles[candles.length - 1] : null);
   }, [candles]);
@@ -130,12 +162,26 @@ export default function ChartWidget({ widget }: { widget: WidgetInstance }) {
     const el = containerRef.current;
     if (!el || !candles || candles.length === 0) return;
 
+    const isLight = theme === "light";
     const chart = createChart(el, {
-      layout: { background: { color: "#0a0a0a" }, textColor: "#808080", fontSize: 10, attributionLogo: false },
-      grid: { vertLines: { color: "#1a1a1a" }, horzLines: { color: "#1a1a1a" } },
+      layout: {
+        background: { color: isLight ? "#ffffff" : "#0a0a0a" },
+        textColor: isLight ? "#64748b" : "#808080",
+        fontSize: 10,
+        attributionLogo: false,
+      },
+      grid: {
+        vertLines: { color: isLight ? "#f1f5f9" : "#1a1a1a" },
+        horzLines: { color: isLight ? "#f1f5f9" : "#1a1a1a" },
+      },
       crosshair: { mode: 0 },
-      timeScale: { borderColor: "#262626", timeVisible: range === "1D" || range === "5D" },
-      rightPriceScale: { borderColor: "#262626" },
+      timeScale: {
+        borderColor: isLight ? "#cbd5e1" : "#262626",
+        timeVisible: range === "1D" || range === "5D",
+      },
+      rightPriceScale: {
+        borderColor: isLight ? "#cbd5e1" : "#262626",
+      },
       autoSize: true,
       // Mouse-wheel is left free for page scrolling — zoom via drag, pinch, or the range buttons instead.
       handleScroll: { mouseWheel: false, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
@@ -143,8 +189,8 @@ export default function ChartWidget({ widget }: { widget: WidgetInstance }) {
     });
     chartRef.current = chart;
 
-    const upColor = "#00c853";
-    const downColor = "#ff3d3d";
+    const upColor = isLight ? "#15803d" : "#00c853";
+    const downColor = isLight ? "#b91c1c" : "#ff3d3d";
 
     if (chartType === "candles") {
       chart
@@ -159,11 +205,15 @@ export default function ChartWidget({ widget }: { widget: WidgetInstance }) {
         .setData(candles.map((c) => ({ time: ts(c.time), open: c.open, high: c.high, low: c.low, close: c.close })));
     } else if (chartType === "line") {
       chart
-        .addSeries(LineSeries, { color: "#ff9900", lineWidth: 1 })
+        .addSeries(LineSeries, { color: isLight ? "#d97706" : "#ff9900", lineWidth: 1 })
         .setData(candles.map((c) => ({ time: ts(c.time), value: c.close })));
     } else {
       chart
-        .addSeries(AreaSeries, { lineColor: "#ff9900", topColor: "rgba(255,153,0,0.25)", bottomColor: "rgba(255,153,0,0)" })
+        .addSeries(AreaSeries, {
+          lineColor: isLight ? "#d97706" : "#ff9900",
+          topColor: isLight ? "rgba(217,119,6,0.25)" : "rgba(255,153,0,0.25)",
+          bottomColor: "rgba(255,153,0,0)",
+        })
         .setData(candles.map((c) => ({ time: ts(c.time), value: c.close })));
     }
 
@@ -171,7 +221,13 @@ export default function ChartWidget({ widget }: { widget: WidgetInstance }) {
     const vol = chart.addSeries(HistogramSeries, { priceScaleId: "vol", priceFormat: { type: "volume" } });
     vol.priceScale().applyOptions({ scaleMargins: { top: 0.85, bottom: 0 } });
     vol.setData(
-      candles.map((c) => ({ time: ts(c.time), value: c.volume, color: c.close >= c.open ? "rgba(0,200,83,0.4)" : "rgba(255,61,61,0.4)" }))
+      candles.map((c) => ({
+        time: ts(c.time),
+        value: c.volume,
+        color: c.close >= c.open
+          ? (isLight ? "rgba(21,128,61,0.4)" : "rgba(0,200,83,0.4)")
+          : (isLight ? "rgba(185,28,28,0.4)" : "rgba(255,61,61,0.4)"),
+      }))
     );
 
     const overlay = (points: Point[], color: string) =>
@@ -198,12 +254,18 @@ export default function ChartWidget({ widget }: { widget: WidgetInstance }) {
       const m = indicatorData.MACD;
       const pane = paneIdx++;
       chart.addSeries(HistogramSeries, { color: "#4fc3f7" }, pane).setData(
-        m.histogram.map((p) => ({ time: ts(p.time), value: p.value, color: p.value >= 0 ? "rgba(0,200,83,0.6)" : "rgba(255,61,61,0.6)" }))
+        m.histogram.map((p) => ({
+          time: ts(p.time),
+          value: p.value,
+          color: p.value >= 0
+            ? (isLight ? "rgba(21,128,61,0.6)" : "rgba(0,200,83,0.6)")
+            : (isLight ? "rgba(185,28,28,0.6)" : "rgba(255,61,61,0.6)"),
+        }))
       );
-      chart.addSeries(LineSeries, { color: "#ff9900", lineWidth: 1 }, pane).setData(
+      chart.addSeries(LineSeries, { color: isLight ? "#d97706" : "#ff9900", lineWidth: 1 }, pane).setData(
         m.macd.map((p) => ({ time: ts(p.time), value: p.value }))
       );
-      chart.addSeries(LineSeries, { color: "#ffffff", lineWidth: 1 }, pane).setData(
+      chart.addSeries(LineSeries, { color: isLight ? "#0f172a" : "#ffffff", lineWidth: 1 }, pane).setData(
         m.signal.map((p) => ({ time: ts(p.time), value: p.value }))
       );
     }
@@ -222,7 +284,7 @@ export default function ChartWidget({ widget }: { widget: WidgetInstance }) {
       chart.remove();
       chartRef.current = null;
     };
-  }, [candles, chartType, indicatorData, range, byTime]);
+  }, [candles, chartType, indicatorData, range, byTime, theme]);
 
   const toggleIndicator = (ind: Indicator) =>
     setActive((prev) => {
@@ -232,43 +294,107 @@ export default function ChartWidget({ widget }: { widget: WidgetInstance }) {
       return next;
     });
 
+  const isUp = (timeframeStats?.changePercent ?? 0) >= 0;
+
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex gap-1 p-1 flex-wrap shrink-0">
-        {RANGES.map((r) => (
-          <button key={r} className={`term-btn ${range === r ? "active" : ""}`} onClick={() => setRange(r)}>
-            {r}
-          </button>
-        ))}
-        <span className="w-2" />
-        {CHART_TYPES.map((t) => (
-          <button key={t} className={`term-btn ${chartType === t ? "active" : ""}`} onClick={() => setChartType(t)}>
-            {t.toUpperCase()}
-          </button>
-        ))}
-        <span className="w-2" />
-        {INDICATORS.map((ind) => (
-          <button key={ind} className={`term-btn ${active.has(ind) ? "active" : ""}`} onClick={() => toggleIndicator(ind)}>
-            {ind}
-          </button>
-        ))}
+    <div className="flex flex-col h-full select-none">
+      {/* Top Toolbar: Timeframe Buttons, Return % Pill, Chart Types, Indicators */}
+      <div className="flex items-center justify-between gap-1.5 p-1.5 border-b border-[var(--border)] bg-[var(--panel-2)]/60 flex-wrap shrink-0 text-[10px]">
+        {/* Left: Timeframe Range Buttons */}
+        <div className="flex items-center gap-1">
+          {RANGES.map((r) => (
+            <button
+              key={r}
+              className={`term-btn !px-1.5 !py-0.5 font-bold transition-all ${
+                range === r
+                  ? "!bg-[var(--amber)] !text-black !border-[var(--amber)] shadow-sm"
+                  : "hover:text-[var(--text)]"
+              }`}
+              onClick={() => setRange(r)}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+
+        {/* Center: Dynamic Timeframe Return % Pill */}
+        {timeframeStats && (
+          <div
+            className={`flex items-center gap-1.5 px-2 py-0.5 rounded border text-[10px] font-mono shadow-sm transition-all ${
+              isUp
+                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                : "bg-rose-500/15 text-rose-400 border-rose-500/30"
+            }`}
+            title={`Period Return over ${range}: Start ${curSym}${fmt(timeframeStats.startPrice)} → End ${curSym}${fmt(timeframeStats.endPrice)}`}
+          >
+            <span className="font-bold opacity-80 uppercase tracking-wider text-[9px]">{range} RETURN:</span>
+            <span className="font-extrabold text-[11px]">
+              {isUp ? "▲ +" : "▼ "}{fmt(timeframeStats.changePercent, 2)}%
+            </span>
+            <span className="opacity-80 text-[10px] hidden sm:inline">
+              ({isUp ? "+" : ""}{curSym}{fmt(timeframeStats.change, 2)})
+            </span>
+            {timeframeStats.low !== null && timeframeStats.high !== null && (
+              <span className="dim text-[9px] hidden lg:inline pl-1.5 border-l border-[var(--border)]">
+                Range: {curSym}{fmt(timeframeStats.low)} – {curSym}{fmt(timeframeStats.high)}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Right: Chart Type & Technical Indicator Selectors */}
+        <div className="flex items-center gap-1 ml-auto">
+          <div className="flex items-center gap-0.5 bg-[var(--panel)] border border-[var(--border)] rounded p-0.5">
+            {CHART_TYPES.map((t) => (
+              <button
+                key={t}
+                className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase transition-colors ${
+                  chartType === t ? "bg-[var(--amber)] text-black" : "text-[var(--text-dim)] hover:text-[var(--text)]"
+                }`}
+                onClick={() => setChartType(t)}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+
+          <div className="hidden xl:flex items-center gap-0.5">
+            {INDICATORS.map((ind) => (
+              <button
+                key={ind}
+                className={`term-btn !px-1 !py-0.5 text-[9px] ${active.has(ind) ? "active" : ""}`}
+                onClick={() => toggleIndicator(ind)}
+              >
+                {ind}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
-      {error && <div className="p-2 down">Error: {(error as Error).message}</div>}
+
+      {error && <div className="p-2 down text-[11px]">Error: {(error as Error).message}</div>}
+
       <div className="relative flex-1 min-h-0">
         {legend && (
-          <div className="absolute top-1 left-2 z-10 flex flex-col gap-0.5 text-[11px] pointer-events-none bg-[rgba(10,10,10,0.7)] px-2 py-1 rounded max-w-[95%]">
-            <div className="flex gap-3">
-              <span className="dim">O <span className="text-[var(--text)]">{fmt(legend.open)}</span></span>
-              <span className="dim">H <span className="up">{fmt(legend.high)}</span></span>
-              <span className="dim">L <span className="down">{fmt(legend.low)}</span></span>
-              <span className="dim">C <span className={legend.close >= legend.open ? "up" : "down"}>{fmt(legend.close)}</span></span>
+          <div className="absolute top-1 left-2 z-10 flex flex-col gap-0.5 text-[10px] pointer-events-none bg-[var(--panel)]/90 backdrop-blur-sm border border-[var(--border)] px-2 py-1 rounded max-w-[95%] shadow-md">
+            <div className="flex gap-3 items-center">
+              <span className="dim">O <span className="text-[var(--text)] font-semibold">{fmt(legend.open)}</span></span>
+              <span className="dim">H <span className="up font-semibold">{fmt(legend.high)}</span></span>
+              <span className="dim">L <span className="down font-semibold">{fmt(legend.low)}</span></span>
+              <span className="dim">C <span className={`font-bold ${legend.close >= legend.open ? "up" : "down"}`}>{fmt(legend.close)}</span></span>
               <span className="dim">Vol <span className="text-[var(--text)]">{fmtBig(legend.volume)}</span></span>
+              {timeframeStats?.startPrice && (
+                <span className={`pl-1.5 border-l border-[var(--border)] font-bold ${legend.close >= timeframeStats.startPrice ? "up" : "down"}`}>
+                  {legend.close >= timeframeStats.startPrice ? "▲ +" : "▼ "}
+                  {fmt(((legend.close - timeframeStats.startPrice) / timeframeStats.startPrice) * 100, 2)}% vs {range} Open
+                </span>
+              )}
             </div>
             {indicatorRows.length > 0 && (
-              <div className="flex gap-3 flex-wrap">
+              <div className="flex gap-3 flex-wrap text-[9px] pt-0.5 border-t border-[var(--border)]/50">
                 {indicatorRows.map((r) => (
                   <span key={r.label} className="dim">
-                    {r.label} <span style={{ color: r.color }}>{r.value}</span>
+                    {r.label} <span style={{ color: r.color }} className="font-semibold">{r.value}</span>
                   </span>
                 ))}
               </div>

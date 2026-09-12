@@ -1,5 +1,5 @@
 const UA =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
 export type Quote = {
   symbol: string;
@@ -88,8 +88,8 @@ function release(): void {
 }
 
 async function yfetch(url: string, withCrumb = false): Promise<any> {
-  if (Date.now() < cooldownUntil) {
-    throw new Error("yahoo rate-limited (cooling down)");
+  if (withCrumb && Date.now() < cooldownUntil) {
+    throw new Error("yahoo crumb rate-limited (cooling down)");
   }
   const headers: Record<string, string> = { "User-Agent": UA, Accept: "application/json" };
   let full = url;
@@ -104,7 +104,7 @@ async function yfetch(url: string, withCrumb = false): Promise<any> {
     if (!res.ok) {
       if (res.status === 429) {
         consecutive429s++;
-        cooldownUntil = Date.now() + Math.min(30_000 * consecutive429s, 5 * 60_000);
+        cooldownUntil = Date.now() + Math.min(3_000 * consecutive429s, 10_000);
       }
       if (withCrumb && (res.status === 401 || res.status === 403)) session = null;
       throw new Error(`yahoo ${res.status} for ${url}`);
@@ -157,61 +157,94 @@ export async function quotes(symbols: string[]): Promise<Quote[]> {
 
 /** Quote fallback that works without crumb, using the chart endpoint's metadata. */
 export async function quoteFromChart(symbol: string): Promise<Quote> {
-  const json = await yfetch(
-    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`
-  );
-  const meta = json?.chart?.result?.[0]?.meta;
-  if (!meta) throw new Error("yahoo chart: no meta for " + symbol);
-  const price = n(meta.regularMarketPrice);
-  const prev = n(meta.chartPreviousClose ?? meta.previousClose);
-  return {
-    symbol: meta.symbol ?? symbol,
-    name: meta.longName ?? meta.shortName ?? null,
-    price,
-    change: price !== null && prev !== null ? price - prev : null,
-    changePercent: price !== null && prev !== null && prev !== 0 ? ((price - prev) / prev) * 100 : null,
-    open: null,
-    high: n(meta.regularMarketDayHigh),
-    low: n(meta.regularMarketDayLow),
-    previousClose: prev,
-    bid: null,
-    ask: null,
-    volume: n(meta.regularMarketVolume),
-    avgVolume: null,
-    marketCap: null,
-    pe: null,
-    eps: null,
-    dividendYield: null,
-    week52High: n(meta.fiftyTwoWeekHigh),
-    week52Low: n(meta.fiftyTwoWeekLow),
-    beta: null,
-    sharesOutstanding: null,
-    currency: meta.currency ?? null,
-    exchange: meta.fullExchangeName ?? meta.exchangeName ?? null,
-    marketState: null,
-    time: n(meta.regularMarketTime),
-    source: "yahoo-chart",
-  };
+  const hosts = ["query2.finance.yahoo.com", "query1.finance.yahoo.com"];
+  let lastErr: unknown = new Error("no quote data");
+
+  for (const host of hosts) {
+    try {
+      const url = `https://${host}/v8/finance/chart/${encodeURIComponent(
+        symbol
+      )}?range=1d&interval=1d&includePrePost=false`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": UA, Accept: "application/json" },
+      });
+      if (!res.ok) continue;
+      const json = await res.json();
+      const meta = json?.chart?.result?.[0]?.meta;
+      if (!meta) continue;
+
+      const price = n(meta.regularMarketPrice);
+      const prev = n(meta.chartPreviousClose ?? meta.previousClose);
+      return {
+        symbol: meta.symbol ?? symbol,
+        name: meta.longName ?? meta.shortName ?? symbol,
+        price,
+        change: price !== null && prev !== null ? price - prev : null,
+        changePercent: price !== null && prev !== null && prev !== 0 ? ((price - prev) / prev) * 100 : null,
+        open: null,
+        high: n(meta.regularMarketDayHigh),
+        low: n(meta.regularMarketDayLow),
+        previousClose: prev,
+        bid: null,
+        ask: null,
+        volume: n(meta.regularMarketVolume),
+        avgVolume: null,
+        marketCap: null,
+        pe: null,
+        eps: null,
+        dividendYield: null,
+        week52High: n(meta.fiftyTwoWeekHigh),
+        week52Low: n(meta.fiftyTwoWeekLow),
+        beta: null,
+        sharesOutstanding: null,
+        currency: meta.currency ?? null,
+        exchange: meta.fullExchangeName ?? meta.exchangeName ?? null,
+        marketState: null,
+        time: n(meta.regularMarketTime),
+        source: "yahoo-chart",
+      };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  throw lastErr;
 }
 
 // ---- history ----
 
 export async function history(symbol: string, range: string, interval: string): Promise<Candle[]> {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
-    symbol
-  )}?range=${range}&interval=${interval}&includePrePost=false`;
-  const json = await yfetch(url);
-  const result = json?.chart?.result?.[0];
-  if (!result) throw new Error("yahoo: no chart data for " + symbol);
-  const ts: number[] = result.timestamp ?? [];
-  const q = result.indicators?.quote?.[0] ?? {};
-  const candles: Candle[] = [];
-  for (let i = 0; i < ts.length; i++) {
-    const [o, h, l, c] = [q.open?.[i], q.high?.[i], q.low?.[i], q.close?.[i]];
-    if (o == null || h == null || l == null || c == null) continue;
-    candles.push({ time: ts[i], open: o, high: h, low: l, close: c, volume: q.volume?.[i] ?? 0 });
+  const hosts = ["query2.finance.yahoo.com", "query1.finance.yahoo.com"];
+  let lastErr: unknown = new Error("no history data for " + symbol);
+
+  for (const host of hosts) {
+    try {
+      const url = `https://${host}/v8/finance/chart/${encodeURIComponent(
+        symbol
+      )}?range=${range}&interval=${interval}&includePrePost=false`;
+      const res = await fetch(url, {
+        headers: { "User-Agent": UA, Accept: "application/json" },
+      });
+      if (!res.ok) continue;
+      const json = await res.json();
+      const result = json?.chart?.result?.[0];
+      if (!result) continue;
+
+      const ts: number[] = result.timestamp ?? [];
+      const q = result.indicators?.quote?.[0] ?? {};
+      const candles: Candle[] = [];
+      for (let i = 0; i < ts.length; i++) {
+        const [o, h, l, c] = [q.open?.[i], q.high?.[i], q.low?.[i], q.close?.[i]];
+        if (o == null || h == null || l == null || c == null) continue;
+        candles.push({ time: ts[i], open: o, high: h, low: l, close: c, volume: q.volume?.[i] ?? 0 });
+      }
+      if (candles.length > 0) return candles;
+    } catch (err) {
+      lastErr = err;
+    }
   }
-  return candles;
+
+  throw lastErr;
 }
 
 // ---- search ----

@@ -11,6 +11,27 @@
   --down: #ff3d3d;
   --text: #d9d9d9;
   --text-dim: #808080;
+  --hover-bg: #1a1a1a;
+  --table-border: #161616;
+  --itm-call: #0d2010;
+  --itm-put: #200d0d;
+}
+
+[data-theme="light"] {
+  --bg: #eceef1;
+  --panel: #ffffff;
+  --panel-2: #f8f9fa;
+  --border: #cbd5e1;
+  --amber: #b45309;
+  --amber-dim: #78350f;
+  --up: #15803d;
+  --down: #b91c1c;
+  --text: #0f172a;
+  --text-dim: #64748b;
+  --hover-bg: #f1f5f9;
+  --table-border: #e2e8f0;
+  --itm-call: #ecfdf5;
+  --itm-put: #fef2f2;
 }
 
 html,
@@ -20,6 +41,7 @@ body {
   font-family: "SF Mono", "Menlo", "Consolas", "Liberation Mono", monospace;
   font-size: 12px;
   overflow: hidden;
+  transition: background 150ms ease, color 150ms ease;
 }
 
 ::-webkit-scrollbar {
@@ -30,7 +52,7 @@ body {
   background: var(--panel);
 }
 ::-webkit-scrollbar-thumb {
-  background: #333;
+  background: var(--border);
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--amber-dim);
@@ -98,21 +120,12 @@ table.data-table td:first-child {
 table.data-table td {
   text-align: right;
   padding: 2px 6px;
-  border-bottom: 1px solid #161616;
+  border-bottom: 1px solid var(--table-border);
   white-space: nowrap;
 }
 table.data-table tbody tr:hover {
-  background: #1a1a1a;
+  background: var(--hover-bg);
   cursor: pointer;
-}
-
-.flash-white {
-  border-radius: 2px;
-  animation: flash-white-anim 450ms ease-out;
-}
-@keyframes flash-white-anim {
-  0% { background-color: rgba(255, 255, 255, 0.85); }
-  100% { background-color: transparent; }
 }
 
 input,
@@ -151,3 +164,28 @@ button.term-btn.active {
 .react-grid-item > .react-resizable-handle::after {
   border-color: var(--amber-dim) !important;
 }
+
+@keyframes widget-highlight-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 153, 0, 0.9), 0 0 20px rgba(255, 153, 0, 0.8);
+    border-color: var(--amber);
+  }
+  30% {
+    box-shadow: 0 0 0 5px rgba(255, 153, 0, 0.6), 0 0 30px rgba(255, 153, 0, 0.9);
+    border-color: var(--amber);
+  }
+  70% {
+    box-shadow: 0 0 0 2px rgba(255, 153, 0, 0.3), 0 0 15px rgba(255, 153, 0, 0.4);
+    border-color: var(--amber);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 153, 0, 0), 0 0 0 rgba(255, 153, 0, 0);
+  }
+}
+
+.widget-highlighted {
+  animation: widget-highlight-pulse 1.8s ease-out forwards;
+  z-index: 40 !important;
+  border-color: var(--amber) !important;
+}
+

@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { apiGet, fmt, fmtBig, pctClass, type Quote } from "../../lib/api";
+import { apiGet, fmt, fmtBig, pctClass, getCurrencySymbol, type Quote } from "../../lib/api";
 import { useTerminal } from "../../store/terminal";
 import Flash from "../Flash";
 
@@ -17,7 +17,7 @@ export default function WatchlistWidget() {
     queryKey: ["watchlist", watchlist.join(",")],
     queryFn: () => apiGet<Quote[]>(`/api/quotes?symbols=${watchlist.join(",")}`),
     enabled: watchlist.length > 0,
-    refetchInterval: 1_000,
+    refetchInterval: 3_000,
   });
 
   return (
@@ -47,10 +47,11 @@ export default function WatchlistWidget() {
         <tbody>
           {watchlist.map((sym) => {
             const q = data.find((d) => d.symbol === sym);
+            const curSym = getCurrencySymbol(q?.currency, sym);
             return (
               <tr key={sym} onClick={() => setActiveSymbol(sym)}>
                 <td className="font-bold">{sym}</td>
-                <td><Flash value={q?.price}>{fmt(q?.price)}</Flash></td>
+                <td><Flash value={q?.price}>{q?.price !== null && q?.price !== undefined ? `${curSym}${fmt(q?.price)}` : "—"}</Flash></td>
                 <td className={pctClass(q?.changePercent)}>
                   <Flash value={q?.changePercent}>{fmt(q?.changePercent)}%</Flash>
                 </td>

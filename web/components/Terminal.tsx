@@ -8,8 +8,13 @@ import CommandPalette from "./CommandPalette";
 import { useTerminal } from "../store/terminal";
 
 export default function Terminal() {
+  const theme = useTerminal((s) => s.theme);
   const setCommandOpen = useTerminal((s) => s.setCommandOpen);
-  const addWidget = useTerminal((s) => s.addWidget);
+  const focusOrAddWidget = useTerminal((s) => s.focusOrAddWidget);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -20,15 +25,15 @@ export default function Terminal() {
       }
       if (e.altKey) {
         const map: Record<string, () => void> = {
-          "1": () => addWidget("chart"),
-          "2": () => addWidget("quote"),
-          "3": () => addWidget("news"),
-          "4": () => addWidget("screener"),
-          "5": () => addWidget("heatmap"),
-          "6": () => addWidget("crypto"),
-          "7": () => addWidget("options"),
-          "8": () => addWidget("portfolio"),
-          "9": () => addWidget("ai"),
+          "1": () => focusOrAddWidget("chart"),
+          "2": () => focusOrAddWidget("quote"),
+          "3": () => focusOrAddWidget("news"),
+          "4": () => focusOrAddWidget("screener"),
+          "5": () => focusOrAddWidget("heatmap"),
+          "6": () => focusOrAddWidget("crypto"),
+          "7": () => focusOrAddWidget("options"),
+          "8": () => focusOrAddWidget("portfolio"),
+          "9": () => focusOrAddWidget("ai"),
         };
         const fn = map[e.key];
         if (fn) {
@@ -39,10 +44,10 @@ export default function Terminal() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setCommandOpen, addWidget]);
+  }, [setCommandOpen, focusOrAddWidget]);
 
   return (
-    <div className="flex flex-col h-screen">
+    <div data-theme={theme} className="flex flex-col h-screen">
       <TopBar />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />

@@ -3,6 +3,8 @@ import cors from "cors";
 import { marketRouter } from "./routes/market.js";
 import { portfolioRouter } from "./routes/portfolio.js";
 import { aiRouter } from "./routes/ai.js";
+import { researchRouter } from "./routes/research.js";
+import { screenerDashboardRouter } from "./routes/screenerDashboard.js";
 import { allStats } from "./providers/registry.js";
 import { requireApiKey } from "./auth.js";
 import { rateLimit } from "./rateLimit.js";
@@ -30,6 +32,8 @@ app.use(cors({ origin: webOrigin }));
 app.use(express.json());
 
 app.use("/api", marketRouter);
+app.use("/api/research", researchRouter);
+app.use("/api/screener-dashboard", screenerDashboardRouter);
 // Portfolio data and the paid AI endpoint require a shared secret; see auth.ts.
 app.use("/api/portfolios", requireApiKey, portfolioRouter);
 app.use(

@@ -124,3 +124,75 @@ export async function insiderTransactions(symbol: string, filingLimit = 20): Pro
   const parsed = await Promise.all(filings.map((f) => parseForm4(cik, f).catch(() => [])));
   return parsed.flat().sort((a, b) => b.transactionDate.localeCompare(a.transactionDate));
 }
+
+/** Fetch historical XBRL CompanyFacts JSON directly from SEC EDGAR (100% free, full GAAP balance sheets, income statements, cash flows). */
+export async function companyFacts(symbol: string): Promise<any | null> {
+  const cik = await resolveCik(symbol);
+  if (!cik) return null;
+  try {
+    const data = await edgarFetch(`https://data.sec.gov/api/xbrl/companyfacts/CIK${cik}.json`);
+    return data;
+  } catch (err) {
+    return null;
+  }
+}
+
+export type SecFilingDoc = {
+  id: string;
+  documentType: "10-K" | "10-Q" | "8-K" | "Annual Report" | "Quarterly Report" | "Proxy" | "Other";
+  filingDate: string;
+  periodEnded: string;
+  description: string;
+  source: string;
+  url: string;
+};
+
+/** Fetch recent official SEC filings (10-K, 10-Q, 8-K) with direct URLs */
+export async function companySubmissions(symbol: string, limit = 25): Promise<SecFilingDoc[]> {
+  const cik = await resolveCik(symbol);
+  if (!cik) return [];
+  try {
+    const data = await edgarFetch(`https://data.sec.gov/submissions/CIK${cik}.json`);
+    const recent = data?.filings?.recent;
+    if (!recent || !recent.form) return [];
+
+    const cikInt = Number(cik);
+    const docs: SecFilingDoc[] = [];
+
+    for (let i = 0; i < recent.form.length && docs.length < limit; i++) {
+      const form = recent.form[i];
+      if (form !== "10-K" && form !== "10-Q" && form !== "8-K" && form !== "DEF 14A") continue;
+
+      const accession = recent.accessionNumber[i];
+      const accessionNoDashes = accession.replace(/-/g, "");
+      const primaryDoc = recent.primaryDocument[i];
+      const filingDate = recent.filingDate[i];
+      const period = recent.reportDate?.[i] || filingDate;
+      const desc = recent.primaryDocDescription?.[i] || `${form} Filing`;
+
+      let docType: SecFilingDoc["documentType"] = "Other";
+      if (form === "10-K") docType = "10-K";
+      else if (form === "10-Q") docType = "10-Q";
+      else if (form === "8-K") docType = "8-K";
+      else if (form === "DEF 14A") docType = "Proxy";
+
+      // Direct interactive XBRL / HTML document viewer URL
+      const url = `https://www.sec.gov/ix?doc=/Archives/edgar/data/${cikInt}/${accessionNoDashes}/${primaryDoc}`;
+
+      docs.push({
+        id: `${accession}-${i}`,
+        documentType: docType,
+        filingDate,
+        periodEnded: period,
+        description: desc,
+        source: "SEC EDGAR",
+        url,
+      });
+    }
+
+    return docs;
+  } catch (err) {
+    return [];
+  }
+}
+

@@ -151,7 +151,15 @@ async function getQuotes(symbols: string[]): Promise<yahoo.Quote[]> {
   if (remaining.length > 0) {
     const results = await Promise.allSettled(remaining.map((s) => yahoo.quoteFromChart(s)));
     results.forEach((r, i) => {
-      if (r.status === "fulfilled") fetched.set(remaining[i], r.value);
+      if (r.status === "fulfilled" && r.value) fetched.set(remaining[i], r.value);
+    });
+    remaining = remaining.filter((s) => !fetched.has(s));
+  }
+
+  if (remaining.length > 0) {
+    const tvResults = await Promise.allSettled(remaining.map((s) => tradingview.scanQuote(s)));
+    tvResults.forEach((r, i) => {
+      if (r.status === "fulfilled" && r.value) fetched.set(remaining[i], r.value);
     });
     remaining = remaining.filter((s) => !fetched.has(s));
   }
@@ -159,7 +167,7 @@ async function getQuotes(symbols: string[]): Promise<yahoo.Quote[]> {
   if (remaining.length > 0) {
     const results = await Promise.allSettled(remaining.slice(0, 20).map((s) => stooq.quote(s)));
     results.forEach((r, i) => {
-      if (r.status === "fulfilled") fetched.set(remaining[i], r.value);
+      if (r.status === "fulfilled" && r.value) fetched.set(remaining[i], r.value);
     });
   }
 
@@ -375,24 +383,55 @@ marketRouter.get("/crypto/orderbook/:symbol", async (req, res) => {
   }
 });
 
-// ---- macro: treasury yield curve (FRED) + key indexes via ETF proxies (Nasdaq) ----
+// ---- macro: treasury yield curve (FRED) + central banks + key indexes/commodities/FX/AI ----
 
 const YIELD_SERIES: Array<{ id: string; tenor: string }> = [
+  { id: "DGS1MO", tenor: "1M" },
   { id: "DGS3MO", tenor: "3M" },
+  { id: "DGS6MO", tenor: "6M" },
+  { id: "DGS1", tenor: "1Y" },
+  { id: "DGS2", tenor: "2Y" },
   { id: "DGS5", tenor: "5Y" },
   { id: "DGS10", tenor: "10Y" },
   { id: "DGS30", tenor: "30Y" },
 ];
 
-const INDEX_PROXIES: Record<string, string> = {
-  SPY: "S&P 500 (SPY)",
-  DIA: "Dow Jones (DIA)",
-  QQQ: "Nasdaq 100 (QQQ)",
-  IWM: "Russell 2000 (IWM)",
-  GLD: "Gold (GLD)",
-  USO: "WTI Crude (USO)",
-  TLT: "20Y+ Treasury (TLT)",
-  UUP: "Dollar Index (UUP)",
+const CENTRAL_BANKS = [
+  { bank: "US Fed", country: "United States", rate: 5.33, range: "5.25 - 5.50%", note: "Fed Funds Target" },
+  { bank: "BoJ", country: "Japan", rate: 0.25, range: "0.25%", note: "Yen Carry Trade Meter" },
+  { bank: "ECB", country: "Eurozone", rate: 3.65, range: "3.65%", note: "Deposit Facility" },
+  { bank: "BoE", country: "United Kingdom", rate: 5.00, range: "5.00%", note: "Bank Rate" },
+];
+
+const MACRO_SYMBOLS: Record<string, { label: string; category: "indexes" | "commodities" | "fx" | "ai" }> = {
+  // Equities & Volatility
+  SPY: { label: "S&P 500", category: "indexes" },
+  QQQ: { label: "Nasdaq 100", category: "indexes" },
+  DIA: { label: "Dow Jones", category: "indexes" },
+  IWM: { label: "Russell 2000", category: "indexes" },
+  TLT: { label: "20Y+ Treasury", category: "indexes" },
+
+  // Commodities & Energy
+  GLD: { label: "Gold (GLD)", category: "commodities" },
+  SLV: { label: "Silver (SLV)", category: "commodities" },
+  USO: { label: "WTI Crude Oil (USO)", category: "commodities" },
+  UNG: { label: "Natural Gas (UNG)", category: "commodities" },
+  CPER: { label: "Copper (CPER)", category: "commodities" },
+
+  // Currencies & FX Risk
+  UUP: { label: "Dollar Index (DXY/UUP)", category: "fx" },
+  FXY: { label: "Japanese Yen (FXY)", category: "fx" },
+  FXE: { label: "Euro Currency (FXE)", category: "fx" },
+  FXB: { label: "British Pound (FXB)", category: "fx" },
+
+  // AI & Tech Market Drivers
+  NVDA: { label: "Nvidia (NVDA)", category: "ai" },
+  TSLA: { label: "Tesla (TSLA)", category: "ai" },
+  MSFT: { label: "Microsoft (MSFT)", category: "ai" },
+  AAPL: { label: "Apple (AAPL)", category: "ai" },
+  AMZN: { label: "Amazon (AMZN)", category: "ai" },
+  GOOGL: { label: "Alphabet (GOOGL)", category: "ai" },
+  META: { label: "Meta (META)", category: "ai" },
 };
 
 marketRouter.get("/macro", async (req, res) => {
@@ -400,22 +439,42 @@ marketRouter.get("/macro", async (req, res) => {
     const [yieldResults, vix, quotes] = await Promise.all([
       Promise.allSettled(YIELD_SERIES.map((s) => cached(`fred:${s.id}`, 300_000, () => fred.latest(s.id)))),
       cached("fred:VIXCLS", 300_000, () => fred.latest("VIXCLS")).catch(() => null),
-      getQuotes(Object.keys(INDEX_PROXIES)),
+      getQuotes(Object.keys(MACRO_SYMBOLS)),
     ]);
+
     const yields = YIELD_SERIES.map((s, i) => {
       const r = yieldResults[i];
       return { tenor: s.tenor, value: r.status === "fulfilled" ? r.value?.value ?? null : null };
     }).filter((y) => y.value !== null);
 
-    const indexes = quotes.map((q) => ({
-      symbol: q.symbol,
-      label: INDEX_PROXIES[q.symbol] ?? q.symbol,
-      price: q.price,
-      changePercent: q.changePercent,
-    }));
+    // Calculate 2Y-10Y Spread for Yield Curve Inversion tracking
+    const y2 = yields.find((y) => y.tenor === "2Y")?.value;
+    const y10 = yields.find((y) => y.tenor === "10Y")?.value;
+    const spread2y10y = typeof y2 === "number" && typeof y10 === "number" ? Number((y10 - y2).toFixed(2)) : null;
 
-    if (yields.length === 0 && indexes.length === 0) throw new Error("no macro data from any provider");
-    res.json({ yields, vix: vix?.value ?? null, indexes });
+    const items = quotes.map((q) => {
+      const meta = MACRO_SYMBOLS[q.symbol] ?? { label: q.symbol, category: "indexes" as const };
+      return {
+        symbol: q.symbol,
+        label: meta.label,
+        category: meta.category,
+        price: q.price,
+        changePercent: q.changePercent,
+      };
+    });
+
+    if (yields.length === 0 && items.length === 0) throw new Error("no macro data from any provider");
+
+    res.json({
+      yields,
+      spread2y10y,
+      vix: vix?.value ?? null,
+      centralBanks: CENTRAL_BANKS,
+      indexes: items.filter((i) => i.category === "indexes"),
+      commodities: items.filter((i) => i.category === "commodities"),
+      fx: items.filter((i) => i.category === "fx"),
+      ai: items.filter((i) => i.category === "ai"),
+    });
   } catch (err) {
     fail(req, res, err);
   }
@@ -522,6 +581,17 @@ function buildRecapSummary(d: {
   }
   return parts.join(" ");
 }
+
+const INDEX_PROXIES: Record<string, string> = {
+  SPY: "S&P 500 (SPY)",
+  DIA: "Dow Jones (DIA)",
+  QQQ: "Nasdaq 100 (QQQ)",
+  IWM: "Russell 2000 (IWM)",
+  GLD: "Gold (GLD)",
+  USO: "WTI Crude (USO)",
+  TLT: "20Y+ Treasury (TLT)",
+  UUP: "Dollar Index (UUP)",
+};
 
 marketRouter.get("/recap", async (req, res) => {
   try {

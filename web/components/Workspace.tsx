@@ -20,6 +20,8 @@ import CalendarWidget from "./widgets/CalendarWidget";
 import InsiderWidget from "./widgets/InsiderWidget";
 import TvWidget from "./widgets/TvWidget";
 import RecapWidget from "./widgets/RecapWidget";
+import HedgeFundResearchWidget from "./widgets/HedgeFundResearchWidget";
+import ScreenerDashboardWidget from "./widgets/ScreenerDashboardWidget";
 
 const Grid = WidthProvider(GridLayout);
 
@@ -31,6 +33,7 @@ function WidgetBody({ widget }: { widget: WidgetInstance }) {
     case "news": return <NewsWidget widget={widget} />;
     case "heatmap": return <HeatmapWidget />;
     case "screener": return <ScreenerWidget />;
+    case "screener-dashboard": return <ScreenerDashboardWidget widget={widget} />;
     case "crypto": return <CryptoWidget />;
     case "macro": return <MacroWidget />;
     case "options": return <OptionsWidget widget={widget} />;
@@ -40,6 +43,7 @@ function WidgetBody({ widget }: { widget: WidgetInstance }) {
     case "insider": return <InsiderWidget widget={widget} />;
     case "tv": return <TvWidget />;
     case "recap": return <RecapWidget />;
+    case "research": return <HedgeFundResearchWidget widget={widget} />;
   }
 }
 
@@ -91,9 +95,10 @@ function SymbolTag({ widget, activeSymbol }: { widget: WidgetInstance; activeSym
 
 const TITLES: Record<string, string> = {
   quote: "Quote", chart: "Chart", watchlist: "Watchlist", news: "News",
-  heatmap: "Heatmap", screener: "Screener", crypto: "Crypto",
-  macro: "Macro / Indexes", options: "Option Chain", portfolio: "Portfolio", ai: "AI Assistant",
+  heatmap: "Heatmap", screener: "Screener Snapshot", "screener-dashboard": "Screener Dashboard & Fundamental Research",
+  crypto: "Crypto", macro: "Macro / Indexes", options: "Option Chain", portfolio: "Portfolio", ai: "AI Assistant",
   calendar: "Calendar", insider: "Insider Transactions", tv: "Live TV", recap: "Market Recap",
+  research: "Hedge Fund Research ($1B L/S Equity CIO)",
 };
 
 export default function Workspace() {
@@ -103,26 +108,40 @@ export default function Workspace() {
   const removeWidget = useTerminal((s) => s.removeWidget);
   const toggleLinked = useTerminal((s) => s.toggleLinked);
   const activeSymbol = useTerminal((s) => s.activeSymbol);
+  const highlightedWidgetId = useTerminal((s) => s.highlightedWidgetId);
+  const openSoloWidget = useTerminal((s) => s.openSoloWidget);
+  const resetWorkspace = useTerminal((s) => s.resetWorkspace);
 
-  const symbolAware = new Set(["quote", "chart", "news", "options", "insider"]);
+  const isSolo = widgets.length === 1;
+  const symbolAware = new Set(["quote", "chart", "news", "options", "insider", "research", "screener-dashboard"]);
 
   return (
     <Grid
       className="layout"
       layout={layout}
       cols={12}
-      rowHeight={30}
+      rowHeight={24}
       margin={[4, 4]}
       draggableHandle=".panel-title"
       onLayoutChange={(l) => setLayout(l.map(({ i, x, y, w, h }) => ({ i, x, y, w, h })))}
     >
       {widgets.map((w) => (
-        <div key={w.id}>
-          <div className="terminal-panel">
+        <div key={w.id} id={`widget-container-${w.id}`} data-widget-type={w.type}>
+          <div className={`terminal-panel transition-all duration-300 ${highlightedWidgetId === w.id ? "widget-highlighted" : ""}`}>
             <div className="panel-title">
-              <span>
+              <span className="flex items-center">
                 {TITLES[w.type]}
                 {symbolAware.has(w.type) && <SymbolTag widget={w} activeSymbol={activeSymbol} />}
+                {isSolo && (
+                  <button
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={() => resetWorkspace()}
+                    className="ml-2 px-1.5 py-0.2 rounded text-[9px] font-bold bg-[var(--amber)]/15 text-[var(--amber)] border border-[var(--amber)]/40 hover:bg-[var(--amber)] hover:text-black transition-colors"
+                    title="Switch back to Master Terminal (All 17 Widgets)"
+                  >
+                    ★ Master Board
+                  </button>
+                )}
               </span>
               <span className="flex gap-2 items-center">
                 {symbolAware.has(w.type) && (
@@ -136,15 +155,30 @@ export default function Workspace() {
                   </button>
                 )}
                 <button
+                  title={isSolo ? "Restore Master Terminal (All 17 Widgets)" : "Open in Full Page"}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={() => {
+                    if (isSolo) {
+                      resetWorkspace();
+                    } else {
+                      openSoloWidget(w.type, w.symbol);
+                    }
+                  }}
+                  className={`hover:text-[var(--amber)] text-[11px] ${isSolo ? "text-[var(--amber)] font-bold" : "dim"}`}
+                >
+                  {isSolo ? "❐" : "⛶"}
+                </button>
+                <button
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={() => removeWidget(w.id)}
                   className="dim hover:text-[var(--down)]"
+                  title="Close widget"
                 >
                   ✕
                 </button>
               </span>
             </div>
-            <div className="flex-1 overflow-auto min-h-0">
+            <div className="flex-1 overflow-auto min-h-0 overscroll-contain">
               <WidgetBody widget={w} />
             </div>
           </div>

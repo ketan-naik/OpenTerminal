@@ -14,7 +14,7 @@ export default function HeatmapWidget() {
   const { data, error } = useQuery({
     queryKey: ["heatmap"],
     queryFn: () => apiGet<Cell[]>("/api/heatmap"),
-    refetchInterval: 3_000,
+    refetchInterval: 20_000,
   });
 
   useEffect(() => {
@@ -25,7 +25,6 @@ export default function HeatmapWidget() {
       const width = el.clientWidth;
       const height = el.clientHeight;
       if (width === 0 || height === 0) return;
-      el.innerHTML = "";
 
       const valid = data.filter((d) => d.marketCap && d.changePercent !== null);
       type Node = { name: string; children?: Node[]; data?: Cell };
@@ -49,7 +48,7 @@ export default function HeatmapWidget() {
           : d3.interpolateRgb("#1a1a1a", "#ff3d3d")(-clamped / 3);
       };
 
-      const svg = d3.select(el).append("svg").attr("width", width).attr("height", height);
+      const svg = d3.create("svg").attr("width", width).attr("height", height).style("display", "block");
 
       // Clip each sector label to its own column so long names never bleed
       // into the neighboring sector (the visible cause of overlapping text).
@@ -114,6 +113,9 @@ export default function HeatmapWidget() {
         .attr("fill", "#ddd")
         .attr("font-size", 8)
         .text((d: any) => `${d.data.data.changePercent >= 0 ? "+" : ""}${d.data.data.changePercent.toFixed(2)}%`);
+
+      const node = svg.node();
+      if (node) el.replaceChildren(node);
     };
 
     render();
@@ -124,5 +126,5 @@ export default function HeatmapWidget() {
 
   if (error) return <div className="p-2 down">Error: {(error as Error).message}</div>;
   if (!data) return <div className="p-2 dim">Loading heatmap…</div>;
-  return <div ref={ref} className="w-full h-full" />;
+  return <div ref={ref} className="w-full h-full overflow-hidden" />;
 }

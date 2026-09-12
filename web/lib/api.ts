@@ -76,3 +76,41 @@ export function pctClass(n: number | null | undefined): string {
   if (n === null || n === undefined) return "dim";
   return n >= 0 ? "up" : "down";
 }
+
+export function getCurrencySymbol(currency?: string | null, symbol?: string | null): string {
+  const c = (currency ?? "").toUpperCase();
+  const s = (symbol ?? "").toUpperCase();
+  if (c === "INR" || s.endsWith(".NS") || s.endsWith(".BO") || s.startsWith("NSE:") || s.startsWith("BSE:")) {
+    return "₹";
+  }
+  if (c === "EUR" || s.endsWith(".DE") || s.endsWith(".PA") || s.endsWith(".AS")) {
+    return "€";
+  }
+  if (c === "GBP" || s.endsWith(".L")) {
+    return "£";
+  }
+  if (c === "JPY" || s.endsWith(".T")) {
+    return "¥";
+  }
+  if (c === "CAD" || s.endsWith(".TO") || s.endsWith(".V")) {
+    return "CA$";
+  }
+  return "$";
+}
+
+export function fmtCurrency(n: number | null | undefined, currency?: string | null, symbol?: string | null, digits = 2): string {
+  if (n === null || n === undefined || !isFinite(n)) return "—";
+  const sym = getCurrencySymbol(currency, symbol);
+  return `${sym}${fmt(n, digits)}`;
+}
+
+export function fmtCurrencyBig(n: number | null | undefined, currency?: string | null, symbol?: string | null): string {
+  if (n === null || n === undefined || !isFinite(n)) return "—";
+  const sym = getCurrencySymbol(currency, symbol);
+  const abs = Math.abs(n);
+  if (abs >= 1e12) return `${sym}${(n / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9) return `${sym}${(n / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6) return `${sym}${(n / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3) return `${sym}${(n / 1e3).toFixed(1)}K`;
+  return `${sym}${fmt(n, 2)}`;
+}

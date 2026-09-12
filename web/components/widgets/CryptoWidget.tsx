@@ -34,7 +34,7 @@ export default function CryptoWidget() {
   const { data = [], error } = useQuery({
     queryKey: ["crypto"],
     queryFn: () => apiGet<CryptoRow[]>("/api/crypto"),
-    refetchInterval: 1_000,
+    refetchInterval: 5_000,
   });
   const { data: global } = useQuery({
     queryKey: ["crypto-global"],
